@@ -1,34 +1,52 @@
--- Configuração de variáveis
+-- Configurações
 local aimbot_ativo = true
 local autoshot_ativo = true
-local fov = 90 -- Campo de visão para mirar
-local alvo = nil
+local fov = 90
 
--- Interface simples
-function desenharInterface()
-    draw.Text(10, 10, "Aimbot: " .. (aimbot_ativo and "ON" or "OFF"))
-    draw.Text(10, 25, "AutoShot: " .. (autoshot_ativo and "ON" or "OFF"))
+-- Desenhar Interface na tela
+callbacks.Register("Draw", function()
+    draw.Color(0, 255, 0, 255)
+    draw.Text(10, 10, "Aimbot: " .. (aimbot_ativo and "Ativo" or "Desativado"))
+    draw.Text(10, 25, "AutoShot: " .. (autoshot_ativo and "Ativo" or "Desativado"))
+end)
+
+-- Função para calcular ângulo entre dois vetores
+function CalcAngle(from, to)
+    local delta = to - from
+    local pitch = math.atan2(-delta.z, math.sqrt(delta.x^2 + delta.y^2)) * 180 / math.pi
+    local yaw = math.atan2(delta.y, delta.x) * 180 / math.pi
+    return QAngle(pitch, yaw, 0)
 end
 
--- Verifica se o inimigo está dentro do FOV
-function dentroDoFOV(jogador)
-    local angulo_para_inimigo = CalcAngle(localPlayer:GetEyePosition(), jogador:GetEyePosition())
-    local diferenca = AngleDiff(localPlayer:GetViewAngles(), angulo_para_inimigo)
-    return math.abs(diferenca.yaw) <= fov / 2 and math.abs(diferenca.pitch) <= fov / 2
+-- Diferença entre ângulos
+function AngleDiff(a, b)
+    local diff = QAngle(a.pitch - b.pitch, a.yaw - b.yaw, 0)
+    if diff.yaw > 180 then diff.yaw = diff.yaw - 360 end
+    if diff.yaw < -180 then diff.yaw = diff.yaw + 360 end
+    return diff
 end
 
--- Seleciona o inimigo mais próximo do centro da mira
+-- Verifica se está dentro do FOV
+function dentroDoFOV(localPlayer, inimigo)
+    local viewAngles = engine.GetViewAngles()
+    local angulo = CalcAngle(localPlayer:GetEyePosition(), inimigo:GetHitboxPosition(0))
+    local diff = AngleDiff(viewAngles, angulo)
+    return math.abs(diff.yaw) <= fov / 2 and math.abs(diff.pitch) <= fov / 2
+end
+
+-- Seleciona o inimigo mais próximo
 function encontrarAlvo()
-    local melhorDistancia = math.huge
+    local localPlayer = entities.GetLocalPlayer()
     local melhorAlvo = nil
+    local menorDist = math.huge
 
-    for i, jogador in pairs(entities.FindByClass("CCSPlayer")) do
-        if jogador:IsEnemy() and jogador:IsAlive() and not jogador:IsDormant() then
-            if dentroDoFOV(jogador) then
-                local dist = (jogador:GetEyePosition() - localPlayer:GetEyePosition()):Length()
-                if dist < melhorDistancia then
-                    melhorDistancia = dist
-                    melhorAlvo = jogador
+    for _, inimigo in pairs(entities.FindByClass("CCSPlayer")) do
+        if inimigo:IsEnemy() and inimigo:IsAlive() and not inimigo:IsDormant() then
+            if dentroDoFOV(localPlayer, inimigo) then
+                local dist = (localPlayer:GetEyePosition() - inimigo:GetEyePosition()):Length()
+                if dist < menorDist then
+                    menorDist = dist
+                    melhorAlvo = inimigo
                 end
             end
         end
@@ -37,34 +55,20 @@ function encontrarAlvo()
     return melhorAlvo
 end
 
--- Ajusta a mira para o inimigo
-function mirarNoAlvo(inimigo)
-    local angulo = CalcAngle(localPlayer:GetEyePosition(), inimigo:GetHitboxPosition(0)) -- Cabeça
-    engine.SetViewAngles(angulo)
-end
-
--- Dispara automaticamente
-function autoshot()
-    if input.IsButtonDown(MOUSE_LEFT) == false then
-        input.SetMouseDown(MOUSE_LEFT)
-    end
-end
-
--- Callback principal
-callbacks.Register("Draw", function()
-    desenharInterface()
-end)
-
+-- Aimbot + AutoShot
 callbacks.Register("CreateMove", function(cmd)
     if not aimbot_ativo then return end
-    localPlayer = entities.GetLocalPlayer()
+
+    local localPlayer = entities.GetLocalPlayer()
     if not localPlayer or not localPlayer:IsAlive() then return end
 
-    alvo = encontrarAlvo()
+    local alvo = encontrarAlvo()
     if alvo then
-        mirarNoAlvo(alvo)
+        local angulo = CalcAngle(localPlayer:GetEyePosition(), alvo:GetHitboxPosition(0))
+        cmd:SetViewAngles(angulo)
+
         if autoshot_ativo then
-            autoshot()
+            cmd.buttons = bit.bor(cmd.buttons, 1) -- Atira (IN_ATTACK = 1)
         end
     end
 end)
